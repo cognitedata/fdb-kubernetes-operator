@@ -85,20 +85,37 @@ func (c ChangeCoordinators) Reconcile(r *FoundationDBClusterReconciler, context 
 		log.Info("Changing coordinators", "namespace", cluster.Namespace, "cluster", cluster.Name)
 		r.Recorder.Event(cluster, "Normal", "ChangingCoordinators", "Choosing new coordinators")
 
-		candidates := make([]localityInfo, 0, len(status.Cluster.Processes))
-		for _, process := range status.Cluster.Processes {
-			eligible := !process.Excluded && isStateful(process.ProcessClass) && !cluster.InstanceIsBeingRemoved(process.Locality[FDBInstanceIDLabel])
-			if eligible {
-				candidates = append(candidates, localityInfoForProcess(process))
-			}
-		}
-
 		coordinatorCount := cluster.DesiredCoordinatorCount()
-		coordinators, err := chooseDistributedProcesses(candidates, coordinatorCount, processSelectionConstraint{
-			HardLimits: map[string]int{FDBLocalityZoneIDKey: 1},
-		})
+		candidates := make([]localityInfo, 0, len(status.Cluster.Processes))
+		selectCandidates := func(candidates []localityInfo, class fdbtypes.ProcessClass) []localityInfo {
+			for _, process := range status.Cluster.Processes {
+				eligible := !process.Excluded && process.ProcessClass == class && !cluster.InstanceIsBeingRemoved(process.Locality[FDBInstanceIDLabel])
+				if eligible {
+					candidates = append(candidates, localityInfoForProcess(process))
+				}
+			}
+			return candidates
+		}
+		chooseCoordinators := func(candidates []localityInfo) ([]localityInfo, error) {
+			return chooseDistributedProcesses(candidates, coordinatorCount, processSelectionConstraint{
+				HardLimits: map[string]int{FDBLocalityZoneIDKey: 1},
+			})
+		}
+		// Use all stateful pods if needed, but only storage if possible.
+		candidates = selectCandidates(candidates, fdbtypes.ProcessClassStorage)
+		coordinators, err := chooseCoordinators(candidates)
 		if err != nil {
-			return false, err
+			// Add in tLogs as candidates
+			candidates = selectCandidates(candidates, fdbtypes.ProcessClassLog)
+			coordinators, err = chooseCoordinators(candidates)
+			if err != nil {
+				// Add in transaction roles too
+				candidates = selectCandidates(candidates, fdbtypes.ProcessClassTransaction)
+				coordinators, err = chooseCoordinators(candidates)
+				if err != nil {
+					return false, err
+				}
+			}
 		}
 
 		coordinatorAddresses := make([]string, len(coordinators))
