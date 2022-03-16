@@ -24,9 +24,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/FoundationDB/fdb-kubernetes-operator/pkg/podmanager"
-
 	"github.com/FoundationDB/fdb-kubernetes-operator/internal"
+	"github.com/FoundationDB/fdb-kubernetes-operator/pkg/podmanager"
 
 	fdbv1beta2 "github.com/FoundationDB/fdb-kubernetes-operator/api/v1beta2"
 	corev1 "k8s.io/api/core/v1"
@@ -63,9 +62,32 @@ func (a addPods) reconcile(ctx context.Context, r *FoundationDBClusterReconciler
 
 	podMap := internal.CreatePodMap(cluster, pods)
 
+	adminClient, err := r.DatabaseClientProvider.GetAdminClient(cluster, r)
+	if err != nil {
+		return &requeue{curError: err}
+	}
+	defer adminClient.Close()
+	hasDesiredFaultTolerance, err := internal.HasDesiredFaultTolerance(adminClient, cluster)
+	if err != nil {
+		// Hack: If we can't figure out whether we're fault tolerant, that could be because some of
+		// the necessary nodes are down. So we'll assume that we're not fault tolerant, in which
+		// case the loop below will bring up even those nodes that are marked for removal (but might
+		// not have been fully drained before they were stopped for some other reason).
+		hasDesiredFaultTolerance = false
+	}
+
 	for _, processGroup := range cluster.Status.ProcessGroups {
-		_, podExists := podMap[processGroup.ProcessGroupID]
-		if podExists || processGroup.IsMarkedForRemoval() {
+		if _, podExists := podMap[processGroup.ProcessGroupID]; podExists {
+			continue
+		}
+
+		// If this process group is marked for removal, we normally don't want to spin it back up
+		// again. However, in a downscaling scenario, it could be that this is a storage node that
+		// is still draining its data onto another one. Therefore, we only want to leave it off
+		// (by continue'ing) if the cluster is in a fault-tolerant state, meaning that all data
+		// is sufficiently replicated. (This is a simplifying overkill: it would be better to check
+		// if this node specifically is draining.)
+		if processGroup.IsMarkedForRemoval() && hasDesiredFaultTolerance {
 			continue
 		}
 

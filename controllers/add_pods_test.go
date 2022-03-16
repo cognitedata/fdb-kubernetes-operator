@@ -22,7 +22,10 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"sort"
+
+	"k8s.io/utils/pointer"
 
 	"github.com/FoundationDB/fdb-kubernetes-operator/internal"
 
@@ -38,6 +41,7 @@ var _ = Describe("add_pods", func() {
 	var requeue *requeue
 	var initialPods *corev1.PodList
 	var newPods *corev1.PodList
+	var adminClient *mockAdminClient
 
 	BeforeEach(func() {
 		cluster = internal.CreateDefaultCluster()
@@ -57,6 +61,9 @@ var _ = Describe("add_pods", func() {
 
 		initialPods = &corev1.PodList{}
 		err = k8sClient.List(context.TODO(), initialPods)
+		Expect(err).NotTo(HaveOccurred())
+
+		adminClient, err = newMockAdminClientUncast(cluster, k8sClient)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -94,26 +101,100 @@ var _ = Describe("add_pods", func() {
 		})
 
 		It("should create an extra pod", func() {
-			Expect(newPods.Items).To(HaveLen(len(initialPods.Items) + 1))
-			lastPod := newPods.Items[len(newPods.Items)-1]
-			Expect(lastPod.Name).To(Equal("operator-test-1-storage-9"))
-			Expect(lastPod.Labels[fdbv1beta2.FDBProcessGroupIDLabel]).To(Equal("storage-9"))
-			Expect(lastPod.Labels[fdbv1beta2.FDBProcessClassLabel]).To(Equal("storage"))
-			Expect(lastPod.OwnerReferences).To(Equal(internal.BuildOwnerReference(cluster.TypeMeta, cluster.ObjectMeta)))
+			expectNewPodToHaveBeenCreated(initialPods, newPods, cluster)
 		})
 
-		Context("when the process group is being removed", func() {
+		When("the process group is being removed", func() {
 			BeforeEach(func() {
 				cluster.Status.ProcessGroups[len(cluster.Status.ProcessGroups)-1].MarkForRemoval()
 			})
 
-			It("should not requeue", func() {
-				Expect(requeue).To(BeNil())
+			When("the cluster is fully replicated", func() {
+				It("should not requeue", func() {
+					Expect(requeue).To(BeNil())
+				})
+
+				It("should not create any pods", func() {
+					Expect(newPods.Items).To(HaveLen(len(initialPods.Items)))
+				})
 			})
 
-			It("should not create any pods", func() {
-				Expect(newPods.Items).To(HaveLen(len(initialPods.Items)))
+			// The following scenarios are regression tests for a bug where pods marked for removal
+			// would not be recreated. The reason they actually do need to be recreated is that they
+			// might contain data that needs to be drained to other storage nodes, so they should
+			// cease to exist only when they have been successfully drained.
+
+			When("the cluster has degraded availability fault tolerance", func() {
+				BeforeEach(func() {
+					adminClient.maxZoneFailuresWithoutLosingAvailability = pointer.Int(0)
+				})
+
+				It("should not requeue", func() {
+					Expect(requeue).To(BeNil())
+				})
+
+				It("should create an extra pod", func() {
+					expectNewPodToHaveBeenCreated(initialPods, newPods, cluster)
+				})
+			})
+
+			When("the cluster has degraded data fault tolerance", func() {
+				BeforeEach(func() {
+					adminClient.maxZoneFailuresWithoutLosingData = pointer.Int(0)
+				})
+
+				It("should not requeue", func() {
+					Expect(requeue).To(BeNil())
+				})
+
+				It("should create an extra pod", func() {
+					expectNewPodToHaveBeenCreated(initialPods, newPods, cluster)
+				})
+			})
+
+			When("the cluster is not available", func() {
+				BeforeEach(func() {
+					adminClient.frozenStatus = &fdbv1beta2.FoundationDBStatus{
+						Client: fdbv1beta2.FoundationDBStatusLocalClientInfo{
+							DatabaseStatus: fdbv1beta2.FoundationDBStatusClientDBStatus{
+								Available: false,
+							},
+						},
+					}
+				})
+
+				It("should not requeue", func() {
+					Expect(requeue).To(BeNil())
+				})
+
+				It("should create an extra pod", func() {
+					expectNewPodToHaveBeenCreated(initialPods, newPods, cluster)
+				})
+			})
+
+			When("the cluster fault tolerance can not be determined", func() {
+				BeforeEach(func() {
+					adminClient.FailStatus(fmt.Errorf("can't reach cluster"))
+				})
+
+				It("should not requeue", func() {
+					Expect(requeue).To(BeNil())
+				})
+
+				It("should create an extra pod", func() {
+					expectNewPodToHaveBeenCreated(initialPods, newPods, cluster)
+				})
 			})
 		})
 	})
 })
+
+func expectNewPodToHaveBeenCreated(initialPods *corev1.PodList, newPods *corev1.PodList, cluster *fdbv1beta2.FoundationDBCluster) {
+	Expect(newPods.Items).To(HaveLen(len(initialPods.Items) + 1))
+	lastPod := newPods.Items[len(newPods.Items)-1]
+	Expect(lastPod.Name).To(Equal("operator-test-1-storage-9"))
+	Expect(lastPod.Labels[fdbv1beta2.FDBProcessGroupIDLabel]).To(Equal("storage-9"))
+	Expect(lastPod.Labels[fdbv1beta2.FDBProcessClassLabel]).To(Equal("storage"))
+	Expect(lastPod.OwnerReferences).To(Equal(internal.BuildOwnerReference(cluster.TypeMeta, cluster.ObjectMeta)))
+	// TODO: Should we assert something here about persistent volume claims?
+}

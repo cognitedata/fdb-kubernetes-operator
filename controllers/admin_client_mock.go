@@ -44,6 +44,7 @@ type mockAdminClient struct {
 	ReincludedAddresses                      map[string]bool
 	KilledAddresses                          []string
 	frozenStatus                             *fdbv1beta2.FoundationDBStatus
+	statusError                              error
 	Backups                                  map[string]fdbv1beta2.FoundationDBBackupStatusBackupDetails
 	restoreURL                               string
 	clientVersions                           map[string][]string
@@ -101,9 +102,12 @@ func (client *mockAdminClient) GetStatus() (*fdbv1beta2.FoundationDBStatus, erro
 	adminClientMutex.Lock()
 	defer adminClientMutex.Unlock()
 
-	if client.frozenStatus != nil {
+	if client.statusError != nil {
+		return nil, client.statusError
+	} else if client.frozenStatus != nil {
 		return client.frozenStatus, nil
 	}
+
 	pods := &corev1.PodList{}
 	err := client.KubeClient.List(context.TODO(), pods)
 	if err != nil {
@@ -649,6 +653,17 @@ func (client *mockAdminClient) MockIncorrectCommandLine(processGroupID string, i
 // needed.
 func (client *mockAdminClient) Close() error {
 	return nil
+}
+
+// FailStatus causes the GetStatus method to return the given error until UnfailStatus is called.
+func (client *mockAdminClient) FailStatus(err error) {
+	client.statusError = err
+}
+
+// UnfailStatus causes the GetStatus method to revert to its regular behavior, clearing any error
+// that might have been set by FailStatus.
+func (client *mockAdminClient) UnfailStatus() {
+	client.statusError = nil
 }
 
 // FreezeStatus causes the GetStatus method to return its current value until
