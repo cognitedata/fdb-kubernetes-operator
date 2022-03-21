@@ -74,6 +74,9 @@ func (a addPods) reconcile(ctx context.Context, r *FoundationDBClusterReconciler
 		// case the loop below will bring up even those nodes that are marked for removal (but might
 		// not have been fully drained before they were stopped for some other reason).
 		hasDesiredFaultTolerance = false
+		log.Error(err, "Cannot determine cluster availability; spinning up process groups even if they are marked for removal")
+	} else if hasDesiredFaultTolerance {
+		log.Info("Cluster is not fault tolerant; spinning up process groups even if they are marked for removal")
 	}
 
 	for _, processGroup := range cluster.Status.ProcessGroups {
