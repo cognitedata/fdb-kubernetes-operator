@@ -141,5 +141,4 @@ func expectNewPodToHaveBeenCreated(initialPods *corev1.PodList, newPods *corev1.
 	Expect(lastPod.Labels[fdbv1beta2.FDBProcessGroupIDLabel]).To(Equal("storage-9"))
 	Expect(lastPod.Labels[fdbv1beta2.FDBProcessClassLabel]).To(Equal("storage"))
 	Expect(lastPod.OwnerReferences).To(Equal(internal.BuildOwnerReference(cluster.TypeMeta, cluster.ObjectMeta)))
-	// TODO: Should we assert something here about persistent volume claims?
 }
