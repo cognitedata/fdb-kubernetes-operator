@@ -65,6 +65,10 @@ const (
 	// the zone ID.
 	FDBLocalityZoneIDKey = "zoneid"
 
+	// FDBLocalityMachineIDKey represents the key in the locality map that holds
+	// the machine ID.
+	FDBLocalityMachineIDKey = "machineid"
+
 	// FDBLocalityDCIDKey represents the key in the locality map that holds
 	// the DC ID.
 	FDBLocalityDCIDKey = "dcid"
@@ -76,4 +80,12 @@ const (
 	// FDBLocalityProcessIDKey represents the key in the locality map that
 	// holds the process ID.
 	FDBLocalityProcessIDKey = "process_id"
+
+	// FDBLocalityDataHallKey represents the key in the locality map that holds
+	// the data hall.
+	FDBLocalityDataHallKey = "data_hall"
+
+	// FDBLocalityDCIDlKey represents the key in the locality map that holds
+	// the data center ID.
+	FDBLocalityDCIDlKey = "dcid"
 )

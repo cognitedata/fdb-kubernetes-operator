@@ -10079,6 +10079,7 @@ spec:
                     - single
                     - double
                     - triple
+                    - three_data_hall
                     maxLength: 100
                     type: string
                   regions:
@@ -13704,6 +13705,7 @@ spec:
                     - single
                     - double
                     - triple
+                    - three_data_hall
                     maxLength: 100
                     type: string
                   regions:
