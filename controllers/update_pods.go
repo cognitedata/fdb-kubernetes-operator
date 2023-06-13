@@ -99,7 +99,10 @@ func getFaultDomainsWithUnavailablePods(ctx context.Context, logger logr.Logger,
 	faultDomainsWithUnavailablePods := make(map[fdbv1beta2.FaultDomain]fdbv1beta2.None)
 
 	for _, processGroup := range cluster.Status.ProcessGroups {
-		// TODO(manfontan) only consider stateful processes. Because stateless processes do not change the fault tolerance of the cluster.
+		if !processGroup.ProcessClass.IsStateful() {
+			continue
+		}
+
 		if processGroupIsUnavailable(processGroup) {
 			faultDomainsWithUnavailablePods[processGroup.FaultDomain] = fdbv1beta2.None{}
 			continue
@@ -114,12 +117,6 @@ func getFaultDomainsWithUnavailablePods(ctx context.Context, logger logr.Logger,
 		}
 		// If the Pod is marked for deletion, we count it as unavailable.
 		if pod != nil && pod.DeletionTimestamp != nil {
-			faultDomainsWithUnavailablePods[processGroup.FaultDomain] = fdbv1beta2.None{}
-			continue
-		}
-
-		// If the Pod is pending, we count it as unavailable.
-		if pod.Status.Phase == corev1.PodPending {
 			faultDomainsWithUnavailablePods[processGroup.FaultDomain] = fdbv1beta2.None{}
 			continue
 		}
