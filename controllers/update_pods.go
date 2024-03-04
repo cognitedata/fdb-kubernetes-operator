@@ -54,6 +54,13 @@ func (updatePods) reconcile(ctx context.Context, r *FoundationDBClusterReconcile
 	}
 
 	if len(updates) > 0 {
+		// Log the name of all pods to be updated
+		for zone, pods := range updates {
+			for _, pod := range pods {
+				logger.Info("Pod to be updated", "zone", zone, "pod", pod.Name)
+			}
+		}
+
 		if cluster.Spec.AutomationOptions.PodUpdateStrategy == fdbv1beta2.PodUpdateStrategyReplacement {
 			logger.Info("Requeuing reconciliation to replace pods")
 			return &requeue{message: "Requeueing reconciliation to replace pods"}
@@ -175,11 +182,16 @@ func getPodsToUpdate(ctx context.Context, logger logr.Logger, reconciler *Founda
 		needsRemoval, err := replacements.ProcessGroupNeedsRemoval(ctx, reconciler.PodLifecycleManager, reconciler, logger, cluster, processGroup, pvcMap)
 		// Do not update the Pod if unable to determine if it needs to be removed.
 		if err != nil {
+			logger.V(1).Info("Failed check if process group needs removal",
+				"processGroupID", processGroup.ProcessGroupID)
 			continue
 		}
 		if needsRemoval {
+			logger.V(1).Info("Ignore pod requiring removal",
+				"processGroupID", processGroup.ProcessGroupID)
 			continue
 		}
+		logger.V(1).Info("Pod does not require removal", "processGroupID", processGroup.ProcessGroupID)
 
 		pod, err := reconciler.PodLifecycleManager.GetPod(ctx, reconciler, cluster, processGroup.GetPodName(cluster))
 		// If a Pod is not found ignore it for now.
